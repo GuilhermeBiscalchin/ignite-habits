@@ -1,4 +1,4 @@
-import dayjs from 'dayjs'
+import dayjs from "dayjs";
 // importar as Rotas, e o app usar uma função que é recomendação do Fantify
 import { FastifyInstance } from "fastify";
 
@@ -10,6 +10,54 @@ import { prisma } from "./lib/prisma";
 // Métodos HTTP: GET, POST, PUT, PATH,DELETE
 //necessita ser uma função assincróna.
 export async function appRoutes(app: FastifyInstance) {
+
+  app.get('/',()=> {
+    return 'Página está funcionando!'
+  })
+  
+  app.get('/day', async (request) => {
+    const getDayParams = z.object({
+      date: z.coerce.date(),
+    });
+
+    const { date } = getDayParams.parse(request.query);
+
+    const parsedDate = dayjs(date).startOf("day");
+    const weekDay = parsedDate.get("day");
+  
+
+    const possibleHabits = await prisma.habit.findMany({
+      where: {
+        created_at: {
+          lte: date,
+        },
+        weekDays: {
+          some: {
+            week_day: weekDay,
+          },
+        },
+      },
+    });
+
+    const day = await prisma.day.findFirst({
+      where: {
+        date: parsedDate.toDate(),
+      },
+      include: {
+        dayHabits: true,
+      },
+    });
+
+    const completedHabits = day?.dayHabits.map((dayHabit) => {
+      return dayHabit.habit_id;
+    });
+
+    return {
+      possibleHabits,
+      completedHabits,
+    };
+  });
+  
   app.post("/habits", async (request) => {
     const createHabitBody = z.object({
       title: z.string(),
@@ -19,7 +67,7 @@ export async function appRoutes(app: FastifyInstance) {
     const { title, weekDays } = createHabitBody.parse(request.body);
 
     //trabalhar com datas.
-    const today = dayjs().startOf('day').toDate()
+    const today = dayjs().startOf("day").toDate();
 
     //criando com o prisma o habito.
     await prisma.habit.create({
@@ -37,52 +85,94 @@ export async function appRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/day", async (request) => {
-    const getDayParams = z.object({
-        date: z.coerce.date()
-    })
+  //Completar / não completar um habito
+  app.patch("/habits/:id/toggle", async (request) => {
+    const toggleHabitParams = z.object({
+      id: z.string().uuid(),
+    });
 
-    const {date} = getDayParams.parse(request.query)
+    const { id } = toggleHabitParams.parse(request.params);
 
-    const parsedDate = dayjs(date).startOf('day')
-    const weekDay = parsedDate.get('day')
-   
+    //Essa aplicação completa o hábito no dia que a pessoa realizar o hábito, não sendo possível retrocesso.
 
-    const possibleHabits = await prisma.habit.findMany({
-        where:{
-            created_at:{
-                lte:date,
-            },
-            weekDays:{
-                some: {
-                    week_day: weekDay
-                }
-            }
-        }
-    })
+    const today = dayjs().startOf("days").toDate();
 
-    const day = await prisma.day.findUnique({
-        where:{
-            date: parsedDate.toDate(),
+    let day = await prisma.day.findUnique({
+      where: {
+        date: today,
+      },
+    });
+
+    if (!day) {
+      day = await prisma.day.create({
+        data: {
+          date: today,
         },
-        include:{
-            dayHabits:true,
-        }
-    })
-
-    const completedHabits = day?.dayHabits.map(dayHabit => {
-        return dayHabit.habit_id
-    })
-
-    return {
-        possibleHabits,
-        completedHabits,
+      });
     }
+
+    const dayHabit = await prisma.dayHabit.findUnique({
+      where: {
+        day_id_habit_id: {
+          day_id: day.id,
+          habit_id: id,
+        },
+      },
+    });
+
+    if (dayHabit) {
+      //remover a marcação de completo
+      await prisma.dayHabit.delete({
+        where:{
+          id: dayHabit.id
+        }
+      })
+    } else {
+      //completar o hábito
+      await prisma.dayHabit.create({
+        data: {
+          day_id: day.id,
+          habit_id: id,
+        },
+      });
+    }
+  });
+  
+
+  //Rotas de Dias
+  app.get('/summary', async () => {
+    //Retornar uma lista com várias [array], dentro.
+    const summary = await prisma.$queryRaw`
+      SELECT 
+        D.id,
+        D.date,
+        (
+          SELECT 
+            cast(count(*) as float) 
+          FROM day_habits DH
+          WHERE DH.day_id = D.id 
+        ) as completed ,
+        (
+          SELECT
+            cast(count(*) as float)
+          FROM  habit_week_days HWD 
+          JOIN habits H
+					ON H.id = HWD.habit_id
+          WHERE 
+            HWD.week_day = cast(strftime('%w', D.date/1000.00, 'unixepoch') as int)
+            AND H.created_at <= D.date
+        ) as amount
+      FROM days D
+    `
+    return summary
+
   })
+
+  
 }
 
 //Rota de quando completar o habito.
 
- //informações a receber.
-    //Todos os habitos possiveis
-    // habitos que ja foram completados.s
+//informações a receber.
+//Todos os habitos possiveis
+// habitos que ja foram completados.s
