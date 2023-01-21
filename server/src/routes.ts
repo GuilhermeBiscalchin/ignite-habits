@@ -10,12 +10,11 @@ import { prisma } from "./lib/prisma";
 // Métodos HTTP: GET, POST, PUT, PATH,DELETE
 //necessita ser uma função assincróna.
 export async function appRoutes(app: FastifyInstance) {
+  app.get("/", () => {
+    return "Página está funcionando!";
+  });
 
-  app.get('/',()=> {
-    return 'Página está funcionando!'
-  })
-  
-  app.get('/day', async (request) => {
+  app.get("/day", async (request) => {
     const getDayParams = z.object({
       date: z.coerce.date(),
     });
@@ -24,7 +23,6 @@ export async function appRoutes(app: FastifyInstance) {
 
     const parsedDate = dayjs(date).startOf("day");
     const weekDay = parsedDate.get("day");
-  
 
     const possibleHabits = await prisma.habit.findMany({
       where: {
@@ -48,16 +46,17 @@ export async function appRoutes(app: FastifyInstance) {
       },
     });
 
-    const completedHabits = day?.dayHabits.map((dayHabit) => {
-      return dayHabit.habit_id;
-    });
+    const completedHabits =
+      day?.dayHabits.map((dayHabit) => {
+        return dayHabit.habit_id;
+      }) ?? [];
 
     return {
       possibleHabits,
       completedHabits,
     };
   });
-  
+
   app.post("/habits", async (request) => {
     const createHabitBody = z.object({
       title: z.string(),
@@ -123,10 +122,10 @@ export async function appRoutes(app: FastifyInstance) {
     if (dayHabit) {
       //remover a marcação de completo
       await prisma.dayHabit.delete({
-        where:{
-          id: dayHabit.id
-        }
-      })
+        where: {
+          id: dayHabit.id,
+        },
+      });
     } else {
       //completar o hábito
       await prisma.dayHabit.create({
@@ -137,10 +136,9 @@ export async function appRoutes(app: FastifyInstance) {
       });
     }
   });
-  
 
   //Rotas de Dias
-  app.get('/summary', async () => {
+  app.get("/summary", async () => {
     //Retornar uma lista com várias [array], dentro.
     const summary = await prisma.$queryRaw`
       SELECT 
@@ -163,12 +161,9 @@ export async function appRoutes(app: FastifyInstance) {
             AND H.created_at <= D.date
         ) as amount
       FROM days D
-    `
-    return summary
-
-  })
-
-  
+    `;
+    return summary;
+  });
 }
 
 //Rota de quando completar o habito.
